@@ -1,7 +1,10 @@
 import { useState } from "react";
 import server from "./server";
+import * as secp from "ethereum-cryptography/secp256k1";
+import { sha256 } from "ethereum-cryptography/sha256";
+import { utf8ToBytes, toHex, hexToBytes } from "ethereum-cryptography/utils";
 
-function Transfer({ address, setBalance }) {
+function Transfer({ address, setBalance, privateKey }) {
   const [sendAmount, setSendAmount] = useState("");
   const [recipient, setRecipient] = useState("");
 
@@ -10,17 +13,43 @@ function Transfer({ address, setBalance }) {
   async function transfer(evt) {
     evt.preventDefault();
 
+    if (!privateKey) {
+      alert("Please enter your private key in the Wallet first.");
+      return;
+    }
+
+    const message = JSON.stringify({
+      sender: address,
+      recipient,
+      amount: parseInt(sendAmount),
+    });
+
+    // Hash the message
+    const messageHash = sha256(utf8ToBytes(message));
+
+    // Convert private key to bytes
+    const privateKeyBytes = hexToBytes(privateKey.trim());
+
+    // Sign message hash
+    // signSync returns [signature, recovery] when recovered: true
+    const [signature, recovery] = secp.signSync(messageHash, privateKeyBytes, {
+      recovered: true,
+    });
+
+    const signatureHex = toHex(signature);
+
     try {
       const {
         data: { balance },
       } = await server.post(`send`, {
-        sender: address,
-        amount: parseInt(sendAmount),
-        recipient,
+        message,
+        signature: signatureHex,
+        recovery,
       });
+
       setBalance(balance);
     } catch (ex) {
-      alert(ex.response.data.message);
+      alert(ex.response?.data?.message || "Error sending transaction");
     }
   }
 
@@ -34,16 +63,16 @@ function Transfer({ address, setBalance }) {
           placeholder="1, 2, 3..."
           value={sendAmount}
           onChange={setValue(setSendAmount)}
-        ></input>
+        />
       </label>
 
       <label>
         Recipient
         <input
-          placeholder="Type an address, for example: 0x2"
+          placeholder="Recipient address"
           value={recipient}
           onChange={setValue(setRecipient)}
-        ></input>
+        />
       </label>
 
       <input type="submit" className="button" value="Transfer" />
